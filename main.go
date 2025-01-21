@@ -7,6 +7,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/fogleman/ease"
+	"os"
 	"os/exec"
 	"strconv"
 	"time"
@@ -272,10 +273,39 @@ func (m model) createBoilerPlate() string {
 
 func createFolderCmd(folderName string) tea.Cmd {
 	return func() tea.Msg {
-		cmd := exec.Command("mkdir", folderName)
-		err := cmd.Run()
+		if _, err := os.Stat(folderName); !os.IsNotExist(err) {
+			fmt.Printf("Folder '%s' sudah ada!\n", folderName)
+		}
+
+		err := exec.Command("mkdir", folderName).Run()
 		if err != nil {
 			fmt.Println("Gagal membuat folder:", err)
+		}
+
+		gomod := exec.Command("go", "mod", "init", folderName)
+		gomod.Dir = folderName
+		err = gomod.Run()
+		if err != nil {
+			fmt.Println(err)
+		}
+
+		if err != nil {
+			fmt.Println(err)
+		}
+
+		filepath := folderName + "/main.go"
+		fileContent := `
+		package main
+		
+		import "fmt"
+
+		func main() {
+			fmt.Println("hello world")
+		}
+		`
+		err = os.WriteFile(filepath, []byte(fileContent), 0644)
+		if err != nil {
+			fmt.Println("Gagal membuat file: ", err)
 		}
 		return CreateFolderMsg{}
 	}
