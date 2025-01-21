@@ -118,6 +118,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case CreateFolderMsg:
 		m.Loaded = false
 		m.Done = true
+		m.Quitting = true
 		return m, tea.Quit
 	case spinner.TickMsg:
 		var cmd tea.Cmd
@@ -273,7 +274,6 @@ func createFolderCmd(folderName string) tea.Cmd {
 	return func() tea.Msg {
 		cmd := exec.Command("mkdir", folderName)
 		err := cmd.Run()
-		time.Sleep(2 * time.Second) // Simulasi delay
 		if err != nil {
 			fmt.Println("Gagal membuat folder:", err)
 		}
