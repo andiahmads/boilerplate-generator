@@ -2,15 +2,14 @@ package main
 
 import (
 	"fmt"
-	"math"
-	"strconv"
-	"strings"
-	"time"
-
+	"github.com/charmbracelet/bubbles/spinner"
+	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/fogleman/ease"
-	"github.com/lucasb-eyer/go-colorful"
+	"os/exec"
+	"strconv"
+	"time"
 )
 
 const (
@@ -35,16 +34,33 @@ var (
 )
 
 func main() {
-	initModel := model{0, false, 10, 0, 0, false, false}
-	p := tea.NewProgram(initModel)
+	p := tea.NewProgram(initModel())
 	if _, err := p.Run(); err != nil {
 		fmt.Println("could not start program:", err)
 	}
 }
 
+func initModel() model {
+	ti := textinput.New()
+	ti.Placeholder = "project name:"
+	ti.Focus()
+	ti.CharLimit = 156
+	ti.Width = 20
+	sp := spinner.New()
+	sp.Spinner = spinner.Dot
+
+	m := model{Choice: 0,
+		Chosen: false,
+		Ticks:  60, Frames: 0, Progress: 0, Loaded: false, Quitting: false,
+		textInput: ti, Submitted: false, Spinner: sp}
+
+	return m
+}
+
 type (
-	tickMsg  struct{}
-	frameMsg struct{}
+	tickMsg         struct{}
+	frameMsg        struct{}
+	CreateFolderMsg struct{}
 )
 
 func tick() tea.Cmd {
@@ -61,13 +77,18 @@ func frame() tea.Cmd {
 }
 
 type model struct {
-	Choice   int
-	Chosen   bool
-	Ticks    int
-	Frames   int
-	Progress float64
-	Loaded   bool
-	Quitting bool
+	Choice     int
+	Chosen     bool
+	Ticks      int
+	Frames     int
+	Progress   float64
+	Loaded     bool
+	Quitting   bool
+	textInput  textinput.Model
+	Submitted  bool
+	Spinner    spinner.Model
+	Done       bool
+	FolderName string
 }
 
 func (m model) Init() tea.Cmd {
@@ -77,31 +98,59 @@ func (m model) Init() tea.Cmd {
 // Main update function.
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// Make sure these keys always quit
-	if msg, ok := msg.(tea.KeyMsg); ok {
-		k := msg.String()
-		if k == "q" || k == "esc" || k == "ctrl+c" {
-			m.Quitting = true
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		switch msg.String() {
+
+		case "enter":
+			switch m.Choice {
+			case 0:
+				m.FolderName = m.textInput.Value()
+				if m.FolderName != "" {
+					m.Loaded = true
+					m.Done = true
+					return m, tea.Batch(m.Spinner.Tick, createFolderCmd(m.FolderName))
+				}
+			}
+		case "ctrl+c", "q":
 			return m, tea.Quit
 		}
+	case CreateFolderMsg:
+		m.Loaded = false
+		m.Done = true
+		return m, tea.Quit
+	case spinner.TickMsg:
+		var cmd tea.Cmd
+		m.Spinner, cmd = m.Spinner.Update(msg)
+		return m, cmd
 	}
 
-	// Hand off the message and model to the appropriate update function for the
-	// appropriate view based on the current state.
 	if !m.Chosen {
 		return updateChoices(msg, m)
 	}
-	return updateChosen(msg, m)
+
+	var cmd1, cmd2 tea.Cmd
+	m.textInput, cmd1 = m.textInput.Update(msg)
+
+	updatedModel, cmd2 := updateChosen(msg, m)
+
+	// Gabungkan semua command agar dijalankan oleh Bubble Tea
+	return updatedModel, tea.Batch(cmd1, cmd2)
 }
 
 func (m model) View() string {
 	var s string
 	if m.Quitting {
-		return "\n See you letter!\n\n"
+		data := fmt.Sprintf("\n🎉 Folder '%s' berhasil dibuat!\n", m.FolderName)
+		return data + "\n See you letter!\n\n"
 	}
 	if !m.Chosen {
 		s = choicesView(m)
 	} else {
 		s = chosenView(m)
+		if m.Done {
+			s = loadAnimation(m)
+		}
 	}
 	return mainStyle.Render("\n" + s + "\n\n")
 }
@@ -147,8 +196,8 @@ func choicesView(m model) string {
 		"%s\n%s\n%s\n%s",
 		checkbox("1.Create BoilerPlate", c == 0),
 		checkbox("2.add package modular", c == 1),
-		checkbox("Read something", c == 2),
-		checkbox("See friends", c == 3),
+		checkbox("3.Read something", c == 2),
+		checkbox("4.See friends", c == 3),
 	)
 	return fmt.Sprintf(tpl, choices, ticksStyle.Render(strconv.Itoa(m.Ticks)))
 }
@@ -157,7 +206,9 @@ func chosenView(m model) string {
 	var msg string
 	switch m.Choice {
 	case 0:
-		msg = fmt.Sprintf("create boilerplate?\n\nCool, we'll need %s and %s...", keywordStyle.Render("libgarden"), keywordStyle.Render("vegeutils"))
+		// msg = fmt.Sprintf("create pkg?\n\nCool, we'll need %s and %s...", keywordStyle.Render("libgarden"), keywordStyle.Render("vegeutils"))
+		msg = m.createBoilerPlate()
+
 	case 1:
 		msg = fmt.Sprintf("create pkg?\n\nCool, we'll need %s and %s...", keywordStyle.Render("libgarden"), keywordStyle.Render("vegeutils"))
 	case 2:
@@ -165,13 +216,13 @@ func chosenView(m model) string {
 	default:
 		msg = fmt.Sprintf("It’s always good to see friends.\n\nFetching %s and %s...", keywordStyle.Render("social-skills"), keywordStyle.Render("conversationutils"))
 	}
-	label := "Downloading..."
-	if m.Loaded {
-		label = fmt.Sprintf("Downloaded. Exiting in %s seconds...", ticksStyle.Render(strconv.Itoa(m.Ticks)))
-	}
+	// label := "Downloading..."
+	// if m.Loaded {
+	// 	label = fmt.Sprintf("Downloaded. Exiting in %s seconds...", ticksStyle.Render(strconv.Itoa(m.Ticks)))
+	// }
+	return msg
 
-	return msg + "\n\n" + label + "\n" + progressbar(m.Progress) + "%"
-
+	// return msg + "\n\n" + label + "\n" + progressbar(m.Progress) + "%"
 }
 
 func checkbox(label string, checked bool) string {
@@ -190,7 +241,8 @@ func updateChosen(msg tea.Msg, m model) (tea.Model, tea.Cmd) {
 			if m.Progress >= 1 {
 				m.Progress = 1
 				m.Loaded = true
-				m.Ticks = 3
+				m.Done = false
+				m.Ticks = 5
 				return m, tick()
 			}
 			return m, frame()
@@ -205,47 +257,36 @@ func updateChosen(msg tea.Msg, m model) (tea.Model, tea.Cmd) {
 			return m, tick()
 		}
 	}
-
 	return m, nil
 }
 
-func progressbar(percent float64) string {
-	w := float64(progressBarWidth)
+func (m model) createBoilerPlate() string {
+	return fmt.Sprintf(
+		"project name, please use `- or _` for separator?\n\n%s\n\n%s",
+		m.textInput.View(),
+		"(esc to quit)",
+	) + "\n"
 
-	fullSize := int(math.Round(w * percent))
-	var fullCells string
-	for i := 0; i < fullSize; i++ {
-		fullCells += ramp[i].Render(progressFullChar)
-	}
-
-	emptySize := int(w) - fullSize
-	emptyCells := strings.Repeat(progressEmpty, emptySize)
-
-	return fmt.Sprintf("%s%s %3.0f", fullCells, emptyCells, math.Round(percent*100))
 }
 
-func makeRampStyles(colorA, colorB string, steps float64) (s []lipgloss.Style) {
-	cA, _ := colorful.Hex(colorA)
-	cB, _ := colorful.Hex(colorB)
-
-	for i := 0.0; i < steps; i++ {
-		c := cA.BlendLuv(cB, i/steps)
-		s = append(s, lipgloss.NewStyle().Foreground(lipgloss.Color(colorToHex(c))))
+func createFolderCmd(folderName string) tea.Cmd {
+	return func() tea.Msg {
+		cmd := exec.Command("mkdir", folderName)
+		err := cmd.Run()
+		time.Sleep(2 * time.Second) // Simulasi delay
+		if err != nil {
+			fmt.Println("Gagal membuat folder:", err)
+		}
+		return CreateFolderMsg{}
 	}
-	return
 }
 
-// Convert a colorful.Color to a hexadecimal format.
-func colorToHex(c colorful.Color) string {
-	return fmt.Sprintf("#%s%s%s", colorFloatToHex(c.R), colorFloatToHex(c.G), colorFloatToHex(c.B))
-}
+func loadAnimation(m model) string {
+	var msg string
+	label := "generate package..."
 
-// Helper function for converting colors to hex. Assumes a value between 0 and
-// 1.
-func colorFloatToHex(f float64) (s string) {
-	s = strconv.FormatInt(int64(f*255), 16)
-	if len(s) == 1 {
-		s = "0" + s
+	if m.Loaded {
+		label = fmt.Sprintf("Downloaded. Exiting in %s seconds...", ticksStyle.Render(strconv.Itoa(m.Ticks)))
 	}
-	return
+	return msg + "\n\n" + label + "\n" + progressbar(m.Progress) + "%"
 }
