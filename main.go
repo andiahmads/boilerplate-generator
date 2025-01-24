@@ -2,15 +2,18 @@ package main
 
 import (
 	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strconv"
+	"text/template"
+	"time"
+
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/fogleman/ease"
-	"os"
-	"os/exec"
-	"strconv"
-	"time"
 )
 
 const (
@@ -33,6 +36,21 @@ var (
 	// Gradient colors we'll use for the progress bar
 	ramp = makeRampStyles("#B14FFF", "#00FFA3", progressBarWidth)
 )
+
+type model struct {
+	Choice     int
+	Chosen     bool
+	Ticks      int
+	Frames     int
+	Progress   float64
+	Loaded     bool
+	Quitting   bool
+	textInput  textinput.Model
+	Submitted  bool
+	Spinner    spinner.Model
+	Done       bool
+	FolderName string
+}
 
 func main() {
 	p := tea.NewProgram(initModel())
@@ -77,23 +95,8 @@ func frame() tea.Cmd {
 
 }
 
-type model struct {
-	Choice     int
-	Chosen     bool
-	Ticks      int
-	Frames     int
-	Progress   float64
-	Loaded     bool
-	Quitting   bool
-	textInput  textinput.Model
-	Submitted  bool
-	Spinner    spinner.Model
-	Done       bool
-	FolderName string
-}
-
 func (m model) Init() tea.Cmd {
-	return tick()
+	return tea.Batch(tick())
 }
 
 // Main update function.
@@ -110,7 +113,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if m.FolderName != "" {
 					m.Loaded = true
 					m.Done = true
-					return m, tea.Batch(m.Spinner.Tick, createFolderCmd(m.FolderName))
+					return m, tea.Batch(m.Spinner.Tick, createFolderCmd(m, m.FolderName))
 				}
 			}
 		case "ctrl+c", "q":
@@ -144,7 +147,7 @@ func (m model) View() string {
 	var s string
 	if m.Quitting {
 		data := fmt.Sprintf("\n🎉 Folder '%s' berhasil dibuat!\n", m.FolderName)
-		return data + "\n See you letter!\n\n"
+		return data + "\n Happy hacking!!🎉🎉🎉\n\n"
 	}
 	if !m.Chosen {
 		s = choicesView(m)
@@ -244,7 +247,7 @@ func updateChosen(msg tea.Msg, m model) (tea.Model, tea.Cmd) {
 				m.Progress = 1
 				m.Loaded = true
 				m.Done = false
-				m.Ticks = 5
+				m.Ticks = 10
 				return m, tick()
 			}
 			return m, frame()
@@ -271,7 +274,12 @@ func (m model) createBoilerPlate() string {
 
 }
 
-func createFolderCmd(folderName string) tea.Cmd {
+type TemplateData struct {
+	ProjectName string
+	Version     string
+}
+
+func createFolderCmd(m model, folderName string) tea.Cmd {
 	return func() tea.Msg {
 		if _, err := os.Stat(folderName); !os.IsNotExist(err) {
 			fmt.Printf("Folder '%s' sudah ada!\n", folderName)
@@ -289,23 +297,60 @@ func createFolderCmd(folderName string) tea.Cmd {
 			fmt.Println(err)
 		}
 
-		if err != nil {
-			fmt.Println(err)
+		data := TemplateData{
+			ProjectName: folderName,
+			Version:     "1.0.0",
 		}
 
-		filepath := folderName + "/main.go"
-		fileContent := `
-		package main
-		
-		import "fmt"
-
-		func main() {
-			fmt.Println("hello world")
+		// download list pkg
+		for _, v := range getPackage() {
+			pkgx := exec.Command("go", "get", v)
+			pkgx.Dir = folderName
+			out, err := pkgx.CombinedOutput()
+			if err != nil {
+				m.Done = false
+				fmt.Printf("Error executing go get %s: %v\nOutput: %s\n", v, err, string(out))
+			}
 		}
-		`
-		err = os.WriteFile(filepath, []byte(fileContent), 0644)
-		if err != nil {
-			fmt.Println("Gagal membuat file: ", err)
+		templateDir := "template/"
+
+		for folder, files := range projectArch(folderName) {
+			err := os.MkdirAll(folder, os.ModePerm)
+			if err != nil {
+				fmt.Printf("Gagal membuat folder %s: %v\n", folder, err)
+				continue
+			}
+			for _, file := range files {
+				templatePath := filepath.Join(templateDir, file+".template")
+				content, err := os.ReadFile(templatePath)
+				outputPath := filepath.Join(folder, file)
+				fmt.Println(content)
+				if err != nil {
+					m.Done = false
+					fmt.Printf("gagal membuat project:%v", err)
+					content = []byte("// default content\n")
+				}
+
+				// parser template dengan subtitusi variable
+				tmpl, err := template.New(file).Parse(string(content))
+				if err != nil {
+					fmt.Printf("gagal membuat template:%v\n", err)
+				}
+
+				file, err := os.Create(outputPath)
+				if err != nil {
+					fmt.Printf("Gagal mem-parsing template %s: %v\n", templatePath, err)
+				}
+				defer file.Close()
+
+				err = tmpl.Execute(file, data)
+				if err != nil {
+					fmt.Printf("Gagal menulis ke file %s: %v\n", outputPath, err)
+					continue
+				}
+				fmt.Printf("Berhasil membuat file %s\n", outputPath)
+
+			}
 		}
 		return CreateFolderMsg{}
 	}
@@ -319,4 +364,14 @@ func loadAnimation(m model) string {
 		label = fmt.Sprintf("Downloaded. Exiting in %s seconds...", ticksStyle.Render(strconv.Itoa(m.Ticks)))
 	}
 	return msg + "\n\n" + label + "\n" + progressbar(m.Progress) + "%"
+}
+
+func projectArch(rootDir string) map[string][]string {
+	structures := map[string][]string{
+		fmt.Sprintf("%s/", rootDir):                {"main.go", ".env"},
+		fmt.Sprintf("%s/commons/helper/", rootDir): {"helper.go"},
+		fmt.Sprintf("%s/commons/logger/", rootDir): {"logger.go"},
+		fmt.Sprintf("%s/infra/", rootDir):          {"mysql_conn.go", "redis_conn.go"},
+	}
+	return structures
 }

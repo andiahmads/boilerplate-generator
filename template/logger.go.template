@@ -1,0 +1,108 @@
+package logger
+
+import (
+	"fmt"
+	"github.com/sirupsen/logrus"
+	"{{.ProjectName}}/commons/helper"
+	"log/slog"
+	"os"
+	"time"
+)
+
+type Log struct {
+	Event        string
+	StatusCode   any
+	ResponseTime time.Duration
+	Method       string
+	Request      any            `json:"request"`
+	URL          string         `json:"url"`
+	Path         string         `json:"path"`
+	Message      any            `json:"message"`
+	Response     any            `json:"response"`
+	ClientIP     string         `json:"clien_ip"`
+	UserAgent    string         `json:"user_agent"`
+	Headers      map[string]any `json:"headers"`
+}
+
+var logger = logrus.New()
+
+var (
+	LVL_ERROR = "error"
+	LVL_INFO  = "info"
+	LVL_WARN  = "warning"
+)
+
+func logWithFields(data *Log, fields logrus.Fields, level logrus.Level) {
+	logger.WithFields(fields).Log(level, data.Message)
+}
+
+func CreateLog(data *Log, types string) error {
+	dateNow := time.Now()
+	logName := fmt.Sprintf(helper.DynamicDir()+"logs/%s.log", dateNow.Format("2006-01-02")) //generate file log name
+	file, err := os.OpenFile(logName, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	logger.SetFormatter(&logrus.TextFormatter{
+		ForceQuote:      false,
+		TimestampFormat: "2006-01-02 15:04:05",
+		DisableQuote:    true,
+	})
+	defer file.Close()
+
+	if err == nil {
+		logger.Out = file
+	} else {
+		logger.Info("Failed to log to file, using default stderr")
+	}
+
+	fields := logrus.Fields{
+		"event":         data.Event,
+		"status-code":   data.StatusCode,
+		"response-time": data.ResponseTime.String(),
+		"method":        data.Method,
+		"request":       data.Request,
+		"url":           data.URL,
+		"path":          data.Path,
+		"response":      data.Response,
+		"client-ip":     data.ClientIP,
+		"user-agent":    data.UserAgent,
+		"headers":       data.Headers,
+	}
+	switch types {
+	case LVL_WARN:
+		logWithFields(data, fields, logrus.WarnLevel)
+	case LVL_INFO:
+		logWithFields(data, fields, logrus.InfoLevel)
+	case LVL_ERROR:
+		logWithFields(data, fields, logrus.ErrorLevel)
+	}
+
+	logger.Out = os.Stdout
+
+	return nil
+}
+
+func CallLog(event, message, method, url, dir string, statusCode any, reqData interface{}, level string) {
+	switch level {
+	case "info":
+		level = LVL_INFO
+	case "warning":
+		level = LVL_WARN
+	case "error":
+		level = LVL_ERROR
+	}
+	CreateLog(&Log{
+		Event:      event,
+		Message:    message,
+		StatusCode: statusCode,
+		Method:     method,
+		Request:    reqData,
+		URL:        url,
+		Response:   reqData,
+		Path:       dir,
+	}, level)
+}
+
+func Slogger() *slog.Logger {
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	return logger
+}
+
