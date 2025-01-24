@@ -2,17 +2,20 @@ package main
 
 import (
 	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
+	"strconv"
+	"strings"
+	"text/template"
+	"time"
+
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/fogleman/ease"
-	"os"
-	"os/exec"
-	"path/filepath"
-	"strconv"
-	"text/template"
-	"time"
 )
 
 const (
@@ -311,7 +314,12 @@ func createFolderCmd(m model, folderName string) tea.Cmd {
 				fmt.Printf("Error executing go get %s: %v\nOutput: %s\n", v, err, string(out))
 			}
 		}
-		templateDir := "template/"
+
+		_, b, _, _ := runtime.Caller(0)
+		bStr := filepath.Dir(b)
+		baseDir := strings.Replace(bStr, "commons/helper", "", -1)
+
+		templateDir := baseDir + "/template/"
 
 		for folder, files := range projectArch(folderName) {
 			err := os.MkdirAll(folder, os.ModePerm)
@@ -367,7 +375,7 @@ func loadAnimation(m model) string {
 
 func projectArch(rootDir string) map[string][]string {
 	structures := map[string][]string{
-		fmt.Sprintf("%s/", rootDir):                {"main.go", ".env-example"},
+		fmt.Sprintf("%s/", rootDir):                {"main.go", ".env"},
 		fmt.Sprintf("%s/commons/helper/", rootDir): {"helper.go"},
 		fmt.Sprintf("%s/commons/logger/", rootDir): {"logger.go"},
 		fmt.Sprintf("%s/infra/", rootDir):          {"mysql_conn.go", "redis_conn.go"},
