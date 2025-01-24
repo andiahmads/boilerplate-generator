@@ -2,18 +2,17 @@ package main
 
 import (
 	"fmt"
+	"github.com/charmbracelet/bubbles/spinner"
+	"github.com/charmbracelet/bubbles/textinput"
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
+	"github.com/fogleman/ease"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
 	"text/template"
 	"time"
-
-	"github.com/charmbracelet/bubbles/spinner"
-	"github.com/charmbracelet/bubbles/textinput"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
-	"github.com/fogleman/ease"
 )
 
 const (
@@ -368,7 +367,7 @@ func loadAnimation(m model) string {
 
 func projectArch(rootDir string) map[string][]string {
 	structures := map[string][]string{
-		fmt.Sprintf("%s/", rootDir):                {"main.go", ".env"},
+		fmt.Sprintf("%s/", rootDir):                {"main.go", ".env-example"},
 		fmt.Sprintf("%s/commons/helper/", rootDir): {"helper.go"},
 		fmt.Sprintf("%s/commons/logger/", rootDir): {"logger.go"},
 		fmt.Sprintf("%s/infra/", rootDir):          {"mysql_conn.go", "redis_conn.go"},
