@@ -7,6 +7,7 @@ import(
 	"{{.ProjectName}}/commons/helper"
 	"{{.ProjectName}}/commons/logger"
 	"{{.ProjectName}}/infra"
+	"{{.ProjectName}}/routers"
 	"log"
 	"log/slog"
 	"net/http"
@@ -50,9 +51,7 @@ func main(){
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
 
-	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte("ok"))
-	})
+	r.Mount("/", routes.CommonsRouters())
 
 
 	server := &http.Server{

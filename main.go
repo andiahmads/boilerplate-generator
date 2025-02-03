@@ -2,6 +2,11 @@ package main
 
 import (
 	"fmt"
+	"github.com/charmbracelet/bubbles/spinner"
+	"github.com/charmbracelet/bubbles/textinput"
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
+	"github.com/fogleman/ease"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -10,12 +15,6 @@ import (
 	"strings"
 	"text/template"
 	"time"
-
-	"github.com/charmbracelet/bubbles/spinner"
-	"github.com/charmbracelet/bubbles/textinput"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
-	"github.com/fogleman/ease"
 )
 
 const (
@@ -72,7 +71,7 @@ func initModel() model {
 
 	m := model{Choice: 0,
 		Chosen: false,
-		Ticks:  60, Frames: 0, Progress: 0, Loaded: false, Quitting: false,
+		Ticks:  10, Frames: 0, Progress: 0, Loaded: false, Quitting: false,
 		textInput: ti, Submitted: false, Spinner: sp}
 
 	return m
@@ -315,10 +314,10 @@ func createFolderCmd(m model, folderName string) tea.Cmd {
 			}
 		}
 
+		// create folder base on base dir
 		_, b, _, _ := runtime.Caller(0)
 		bStr := filepath.Dir(b)
 		baseDir := strings.Replace(bStr, "commons/helper", "", -1)
-
 		templateDir := baseDir + "/template/"
 
 		for folder, files := range projectArch(folderName) {
@@ -379,6 +378,8 @@ func projectArch(rootDir string) map[string][]string {
 		fmt.Sprintf("%s/commons/helper/", rootDir): {"helper.go"},
 		fmt.Sprintf("%s/commons/logger/", rootDir): {"logger.go"},
 		fmt.Sprintf("%s/infra/", rootDir):          {"mysql_conn.go", "redis_conn.go"},
+		fmt.Sprintf("%s/middleware/", rootDir):     {"logging.go"},
+		fmt.Sprintf("%s/routers/", rootDir):        {"commons.go"},
 	}
 	return structures
 }

@@ -1,0 +1,86 @@
+package middleware
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"io"
+	"{{.ProjectName}}/commons/logger"
+	"log"
+	"net/http"
+	"strings"
+	"time"
+)
+
+type CaptureResponseWriter struct {
+	http.ResponseWriter
+	buffer *bytes.Buffer
+	status int
+}
+
+func (c *CaptureResponseWriter) Write(p []byte) (int, error) {
+	written, err := c.ResponseWriter.Write(p)
+	if err == nil {
+		c.buffer.Write(p)
+	}
+	return written, err
+}
+
+func (c *CaptureResponseWriter) WriteHeader(statusCode int) {
+	c.status = statusCode
+	c.ResponseWriter.WriteHeader(statusCode)
+}
+
+func Logging(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+
+		var compactBody bytes.Buffer
+		if r.Method != http.MethodGet {
+			body, err := io.ReadAll(r.Body)
+			if err != nil {
+				log.Printf("Error reading request body: %v\n", err)
+				return
+			}
+
+			// Convert JSON dari tubuh permintaan
+			if err := json.Compact(&compactBody, body); err != nil {
+				log.Printf("Error compacting JSON: %v\n", err)
+				return
+			}
+
+			// Duplikat kembali tubuh permintaan
+			newBody := bytes.NewReader(body)
+			r.Body = io.NopCloser(newBody)
+		}
+		// Buat CaptureResponseWriter dengan buffer
+		captureWriter := &CaptureResponseWriter{ResponseWriter: w, buffer: &bytes.Buffer{}}
+		// Dapatkan response dari buffer
+		next.ServeHTTP(captureWriter, r)
+		// Membuat log
+		start := time.Now()
+		responseBody := captureWriter.buffer.Bytes()
+		duration := time.Since(start)
+
+		//capture headers
+		mapHeader := make(map[string]any)
+		for name, value := range r.Header {
+			mapHeader[name] = strings.Join(value, ", ")
+		}
+
+		logger.CreateLog(&logger.Log{
+			Event:        fmt.Sprintf("[%s]", strings.ToUpper(r.URL.RequestURI())),
+			Message:      "OK",
+			Request:      compactBody.String(),
+			Response:     string(responseBody),
+			StatusCode:   captureWriter.status,
+			UserAgent:    r.UserAgent(),
+			Method:       r.Method,
+			Path:         r.URL.Path,
+			URL:          r.RemoteAddr + r.URL.RequestURI(),
+			ClientIP:     r.Header.Get("IP-User"),
+			Headers:      mapHeader,
+			ResponseTime: duration,
+		}, logger.LVL_INFO)
+	})
+}
+

@@ -1,0 +1,21 @@
+package routes
+
+import(
+	"{{.ProjectName}}/middleware"
+	"github.com/go-chi/chi/v5"
+	"net/http"
+)
+
+
+
+func CommonsRouters() *chi.Mux {
+	r := chi.NewRouter()
+	
+	r.With(middleware.Logging).Get("/health", func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("ok"))
+	})
+
+
+	return r
+}
+
